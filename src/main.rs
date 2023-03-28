@@ -1,31 +1,39 @@
-use std::{
-    io::{Read, Write},
-    net::TcpListener,
-};
+use anyhow::Result;
+use bytes::BytesMut;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
-fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
+#[tokio::main]
+async fn main() -> Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    loop {
+        let incoming = listener.accept().await;
+        match incoming {
+            Ok((stream, _)) => {
                 println!("accepted new connection");
-
-                // Wait for client to send us a message, but ignore the content for now
-                let mut buf = [0; 512];
-                loop {
-                    let size = stream.read(&mut buf).unwrap();
-                    if size == 0 {
-                        println!("no more data to read");
-                        break;
-                    }
-                    println!("{:?}", &buf[0..size]);
-                    stream.write("+PONG\r\n".as_bytes()).unwrap();
-                }
+                tokio::spawn(async move {
+                    handle_connection(stream).await.unwrap();
+                });
             }
             Err(e) => {
-                println!("error: {}", e);
+                print!("error {}", e);
             }
         }
     }
+}
+
+async fn handle_connection(mut stream: TcpStream) -> Result<()> {
+    let mut buf = BytesMut::with_capacity(512);
+    loop {
+        // Wait for the client to send us a message but ignore the content for now
+        let bytes_read = stream.read_buf(&mut buf).await?;
+        if bytes_read == 0 {
+            println!("client closed the connection!");
+            break;
+        }
+
+        stream.write("+PONG\r\n".as_bytes()).await?;
+    }
+
+    Ok(())
 }
